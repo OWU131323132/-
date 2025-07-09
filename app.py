@@ -1,44 +1,58 @@
 import streamlit as st
-import pandas as pd
-import plotly.express as px
 import google.generativeai as genai
+from PIL import Image
+import io
 
-# APIキー取得・設定
-api_key = st.secrets["GEMINI_API_KEY"]
-genai.configure(api_key=api_key)
+# --- APIキーの取得 ---
+def get_api_key():
+    # まずSecretsから取得
+    if "GEMINI_API_KEY" in st.secrets:
+        return st.secrets["GEMINI_API_KEY"]
+    else:
+        # なければユーザー入力で取得
+        return st.text_input(
+            "Gemini APIキーを入力してください:",
+            type="password",
+            help="Google AI StudioでAPIキーを取得してください"
+        )
 
-st.title("料理写真から栄養バランス解析＆AI献立提案")
+def main():
+    st.title("料理写真から栄養バランス解析＆AI献立提案アプリ")
 
-# 写真アップロード
-uploaded_file = st.file_uploader("料理写真をアップロードしてください", type=["png", "jpg", "jpeg"])
+    api_key = get_api_key()
 
-if uploaded_file:
-    st.image(uploaded_file, caption="アップロードされた写真", use_column_width=True)
+    if not api_key:
+        st.warning("APIキーを設定してください。")
+        return
 
-    # --- ここで画像解析APIを呼び出して食材を特定すると想定 ---
-    # 食材例（仮）
-    recognized_ingredients = ["鶏肉", "野菜", "ご飯"]
+    # Gemini APIの初期化
+    genai.configure(api_key=api_key)
 
-    st.write("認識された食材:", recognized_ingredients)
+    # 画像アップロード
+    uploaded_file = st.file_uploader("料理写真をアップロードしてください", type=["jpg", "jpeg", "png"])
+    if uploaded_file is not None:
+        image = Image.open(uploaded_file)
+        st.image(image, caption="アップロードされた画像", use_column_width=True)
 
-    # 栄養データ読み込み
-    nutrition_df = pd.read_csv("data/nutrition_data.csv")
+        # TODO: ここで画像解析・栄養解析の処理を実装
+        st.info("画像解析・栄養解析はまだ未実装です。")
 
-    # 食材に対応する栄養素を抽出
-    filtered_df = nutrition_df[nutrition_df['food'].isin(recognized_ingredients)]
+    # ユーザーからの質問入力欄
+    user_input = st.text_area("AIに質問や献立提案を依頼してください")
 
-    st.write("栄養情報")
-    st.dataframe(filtered_df)
+    if st.button("質問する"):
+        if user_input.strip() == "":
+            st.warning("質問内容を入力してください。")
+        else:
+            try:
+                model = genai.Ge
+                model = genai.GenerateModel('gemini-2.0-flash-lite')
 
-    # 栄養素のグラフ表示例
-    fig = px.bar(filtered_df, x='food', y=['calories', 'protein', 'fat', 'carbs'], 
-                 title="栄養バランス")
-    st.plotly_chart(fig)
+                response = model.generate_content(user_input)
+                st.markdown("### AIの回答")
+                st.write(response.text)
+            except Exception as e:
+                st.error(f"API呼び出しでエラーが発生しました: {e}")
 
-    # AIに献立提案を質問
-    prompt = f"次の食材を使って健康的な献立を提案してください：{', '.join(recognized_ingredients)}"
-    model = genai.Model("gemini-2.0-flash-lite")
-    response = model.generate_content(prompt)
-
-    st.subheader("AIによる献立提案")
-    st.write(response.text)
+if __name__ == "__main__":
+    main()
