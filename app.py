@@ -133,6 +133,8 @@ def main():
     st.header("1. 料理名入力で栄養解析")
     dish_name = st.text_input("料理名を入力してください（例：親子丼）")
 
+    add_meal = False
+
     if st.button("栄養解析する"):
         if not dish_name.strip():
             st.warning("料理名を入力してください。")
@@ -150,7 +152,9 @@ def main():
 
                         total = df[['カロリー(kcal)', 'タンパク質(g)', '脂質(g)', '炭水化物(g)']].sum()
 
-                        if st.button("この料理を食事履歴に追加"):
+                        add_meal = st.button("この料理を食事履歴に追加", key="add_button")
+
+                        if add_meal:
                             st.session_state.meal_log.append({
                                 '料理名': dish_name,
                                 'カロリー(kcal)': total['カロリー(kcal)'],
