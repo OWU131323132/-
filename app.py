@@ -4,14 +4,12 @@ import plotly.graph_objects as go
 import google.generativeai as genai
 import re
 
-# APIキーの取得（Secrets優先、なければ手入力）
 def get_api_key():
     if "GEMINI_API_KEY" in st.secrets:
         return st.secrets["GEMINI_API_KEY"]
     else:
         return st.text_input("Gemini APIキーを入力してください:", type="password")
 
-# AIが返したMarkdown形式の栄養テーブルをDataFrameに変換
 def parse_nutrition_text(text):
     lines = [line.strip() for line in text.splitlines() if re.match(r'^\|.*\|$', line.strip())]
     if len(lines) < 3:
@@ -84,7 +82,6 @@ def plot_nutrition_bar(nutrition_sum, goal_dict):
     st.plotly_chart(fig, use_container_width=True)
 
 def get_daily_goal():
-    # 1日の目安栄養素（例）
     return {
         "カロリー(kcal)": 2500,
         "タンパク質(g)": 60,
@@ -119,8 +116,7 @@ def main():
             st.warning("料理名を入力してください。")
         else:
             try:
-                # ChatModelのインスタンス生成
-                model = genai.ChatModel.from_pretrained("gemini-2.0-chat-bison")
+                model = genai.TextGenerationModel.from_pretrained("gemini-2.0-flash-lite")
 
                 prompt = (
                     f"以下の料理の栄養情報を表形式で教えてください。"
@@ -129,15 +125,13 @@ def main():
                     f"Markdown形式のテーブルでお願いします。"
                 )
 
-                messages = [
-                    {"author": "user", "content": prompt}
-                ]
+                response = model.generate(prompt=prompt)
+                text = response.result
 
-                response = model.predict(messages=messages)
                 st.markdown("### 取得した栄養情報（AI出力）")
-                st.code(response.last)
+                st.code(text)
 
-                df = parse_nutrition_text(response.last)
+                df = parse_nutrition_text(text)
                 if df.empty:
                     st.error("AIからの栄養情報解析に失敗しました。")
                 else:
@@ -182,12 +176,11 @@ def main():
                     f"ユーザーの質問:\n{user_input}"
                 )
 
-                model = genai.ChatModel.from_pretrained("gemini-2.0-chat-bison")
-                messages = [{"author": "user", "content": prompt}]
-                response = model.predict(messages=messages)
+                model = genai.TextGenerationModel.from_pretrained("gemini-2.0-flash-lite")
+                response = model.generate(prompt=prompt)
 
                 st.subheader("🤖 AIの献立提案")
-                st.write(response.last)
+                st.write(response.result)
             except Exception as e:
                 st.error(f"AI献立提案の生成に失敗しました: {e}")
 
