@@ -99,6 +99,8 @@ def main():
         st.warning("APIキーを設定してください。")
         return
 
+    genai.configure(api_key=api_key)
+
     if "meal_log" not in st.session_state:
         st.session_state.meal_log = pd.DataFrame()
 
@@ -110,8 +112,7 @@ def main():
         if not dish_name.strip():
             st.warning("料理名を入力してください。")
         else:
-            genai.configure(api_key=api_key)
-            model = genai.GenerateModel('gemini-2.0-flash-lite')
+            model = genai.TextGenerationModel.from_pretrained('gemini-2.0-flash-lite')
 
             prompt = (
                 f"以下の料理の栄養情報を表形式で教えてください。"
@@ -121,7 +122,7 @@ def main():
             )
 
             try:
-                response = model.generate_content(prompt)
+                response = model.generate(prompt=prompt)
                 st.markdown("### 取得した栄養情報（AI出力）")
                 st.code(response.text)
 
@@ -157,22 +158,20 @@ def main():
     if st.button("献立提案を取得"):
         if not api_key:
             st.error("APIキーが設定されていません。")
-        elif st.session_state.meal_log.empty:
-            st.warning("まず食事履歴を追加してください。")
         elif not user_input.strip():
             st.warning("質問内容を入力してください。")
         else:
             try:
                 nutrition_sum = sum_nutrition(st.session_state.meal_log)
+                nutrition_info_str = str(nutrition_sum.to_dict()) if nutrition_sum is not None else "なし"
                 prompt = (
-                    f"ユーザーの今日の食事履歴の栄養摂取合計:\n{nutrition_sum.to_dict()}\n"
+                    f"ユーザーの今日の食事履歴の栄養摂取合計:\n{nutrition_info_str}\n"
                     f"目標: {user_goal}\n"
                     f"この情報をもとに、残りの食事で摂るべき献立を提案してください。\n"
                     f"ユーザーの質問:\n{user_input}"
                 )
-                genai.configure(api_key=api_key)
-                model = genai.GenerateModel('gemini-2.0-flash-lite')
-                response = model.generate_content(prompt)
+                model = genai.TextGenerationModel.from_pretrained('gemini-2.0-flash-lite')
+                response = model.generate(prompt=prompt)
                 st.subheader("🤖 AIの献立提案")
                 st.write(response.text)
             except Exception as e:
