@@ -5,17 +5,13 @@ import pandas as pd
 import plotly.express as px
 
 # --- APIキーの取得 ---
-def get_api_key():
-    try:
-        # 正しい方法：Secretsから取得
-        return st.secrets["GEMINI_API_KEY"]
-    except KeyError:
-        # Secrets未設定ならユーザー入力を許可
-        return st.text_input(
-            "Gemini APIキーを入力してください:",
-            type="password",
-            help="Google AI Studioで取得したAPIキーを入力してください"
-        )
+import streamlit as st
+import google.generativeai as genai
+
+api_key = st.secrets["GEMINI_API_KEY"]
+genai.configure(api_key=api_key)
+st.title("学習アシスタントアプリ")
+
 
 # --- 画像をGeminiに解析させる ---
 def analyze_image_with_gemini(image_file, api_key):
