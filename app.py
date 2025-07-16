@@ -116,8 +116,6 @@ def main():
             st.warning("料理名を入力してください。")
         else:
             try:
-                model = genai.TextGenerationModel.from_pretrained("gemini-2.0-flash-lite")
-
                 prompt = (
                     f"以下の料理の栄養情報を表形式で教えてください。"
                     f"食材、カロリー(kcal)、タンパク質(g)、脂質(g)、炭水化物(g)、食物繊維(g)、カルシウム(mg)、鉄分(mg)、ビタミンC(mg)、ナトリウム(mg)を含めて。"
@@ -125,8 +123,11 @@ def main():
                     f"Markdown形式のテーブルでお願いします。"
                 )
 
-                response = model.generate(prompt=prompt)
-                text = response.result
+                response = genai.generate_text(
+                    model="gemini-2.0-flash-lite",
+                    prompt=prompt,
+                )
+                text = response.candidates[0].output
 
                 st.markdown("### 取得した栄養情報（AI出力）")
                 st.code(text)
@@ -176,11 +177,13 @@ def main():
                     f"ユーザーの質問:\n{user_input}"
                 )
 
-                model = genai.TextGenerationModel.from_pretrained("gemini-2.0-flash-lite")
-                response = model.generate(prompt=prompt)
-
+                response = genai.generate_text(
+                    model="gemini-2.0-flash-lite",
+                    prompt=prompt,
+                )
                 st.subheader("🤖 AIの献立提案")
-                st.write(response.result)
+                st.write(response.candidates[0].output)
+
             except Exception as e:
                 st.error(f"AI献立提案の生成に失敗しました: {e}")
 
