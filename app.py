@@ -12,7 +12,6 @@ def get_api_key():
     except KeyError:
         return st.text_input("Gemini APIキーを入力してください:", type="password")
 
-
 # --- AIにテキストで栄養解析依頼 ---
 def analyze_nutrition_by_text(dish_name, api_key):
     genai.configure(api_key=api_key)
@@ -29,27 +28,22 @@ def analyze_nutrition_by_text(dish_name, api_key):
     response = model.generate_content(prompt)
     return response.text
 
-
 # --- 解析テキストをきれいにDataFrame化 ---
 def parse_nutrition_text(text):
     lines = text.strip().splitlines()
     data = []
 
     for line in lines:
-        # パイプ記号がある行のみ処理（表行）
         if '|' not in line:
             continue
         cols = [c.strip() for c in line.strip('|').split('|')]
-        # 食材名＋4列必須
         if len(cols) < 5:
             continue
-        # 合計や目安、装飾文字はスキップ
         if any(x in cols[0] for x in ['合計', '目安', '**', '—', '合', '計']):
             continue
 
         name = cols[0]
 
-        # 値から「約」「単位」「**」などを除去して数値化
         def clean_value(val):
             val = val.replace('約', '').replace('g', '').replace('kcal', '')\
                      .replace('**', '').replace(',', '').strip()
@@ -79,7 +73,6 @@ def parse_nutrition_text(text):
     df = pd.DataFrame(data)
     return df
 
-
 # --- マクロ栄養素の円グラフ表示 ---
 def plot_macro_pie(df):
     if df.empty:
@@ -90,7 +83,6 @@ def plot_macro_pie(df):
     fig = px.pie(total, names='栄養素', values='量(g)', title='マクロ栄養素割合')
     st.plotly_chart(fig, use_container_width=True)
 
-
 # --- 食事ログの栄養合計を計算 ---
 def sum_nutrition(log):
     if len(log) == 0:
@@ -98,24 +90,32 @@ def sum_nutrition(log):
     df = pd.DataFrame(log)
     return df[['カロリー(kcal)', 'タンパク質(g)', '脂質(g)', '炭水化物(g)']].sum()
 
-
 # --- AIに献立提案依頼 ---
 def generate_meal_plan(api_key, goal, nutrition_summary):
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-1.5-flash')
 
-    prompt = (
-        f"私は今日これまでに以下の栄養素を摂取しました：\n"
-        f"カロリー: {nutrition_summary['カロリー(kcal)']:.1f} kcal、"
-        f"タンパク質: {nutrition_summary['タンパク質(g)']:.1f} g、"
-        f"脂質: {nutrition_summary['脂質(g)']:.1f} g、"
-        f"炭水化物: {nutrition_summary['炭水化物(g)']:.1f} g。\n"
-        f"目標は「{goal}」です。\n"
-        "この目標に合うように今日の残りの食事でおすすめの献立を提案してください。"
-    )
+    if (nutrition_summary['カロリー(kcal)'] == 0 and
+        nutrition_summary['タンパク質(g)'] == 0 and
+        nutrition_summary['脂質(g)'] == 0 and
+        nutrition_summary['炭水化物(g)'] == 0):
+        prompt = (
+            f"私は今日これまでにまだ何も食べていません。\n"
+            f"目標は「{goal}」です。\n"
+            "この目標に合うように今日の食事のおすすめ献立を提案してください。"
+        )
+    else:
+        prompt = (
+            f"私は今日これまでに以下の栄養素を摂取しました：\n"
+            f"カロリー: {nutrition_summary['カロリー(kcal)']:.1f} kcal、"
+            f"タンパク質: {nutrition_summary['タンパク質(g)']:.1f} g、"
+            f"脂質: {nutrition_summary['脂質(g)']:.1f} g、"
+            f"炭水化物: {nutrition_summary['炭水化物(g)']:.1f} g。\n"
+            f"目標は「{goal}」です。\n"
+            "この目標に合うように今日の残りの食事でおすすめの献立を提案してください。"
+        )
     response = model.generate_content(prompt)
     return response.text
-
 
 # --- メイン ---
 def main():
@@ -140,7 +140,6 @@ def main():
         else:
             with st.spinner("AI解析中…"):
                 try:
-                    # 今回は画像解析省略し、テキスト解析で栄養推定
                     text_result = analyze_nutrition_by_text(dish_name, api_key)
                     st.subheader("AI解析結果（テキスト）")
                     st.text(text_result)
@@ -185,18 +184,23 @@ def main():
     ])
 
     if st.button("AIに献立提案を依頼"):
-        if len(st.session_state.meal_log) == 0:
-            st.warning("まず食事履歴を追加してください。")
-        else:
-            with st.spinner("献立提案を生成中…"):
-                try:
+        with st.spinner("献立提案を生成中…"):
+            try:
+                if len(st.session_state.meal_log) == 0:
+                    nutrition_sum = {
+                        'カロリー(kcal)': 0.0,
+                        'タンパク質(g)': 0.0,
+                        '脂質(g)': 0.0,
+                        '炭水化物(g)': 0.0
+                    }
+                else:
                     nutrition_sum = sum_nutrition(st.session_state.meal_log)
-                    response = generate_meal_plan(api_key, goal, nutrition_sum)
-                    st.subheader("🤖 AIの献立提案")
-                    st.write(response)
-                except Exception as e:
-                    st.error(f"献立提案の生成に失敗しました: {e}")
 
+                response = generate_meal_plan(api_key, goal, nutrition_sum)
+                st.subheader("🤖 AIの献立提案")
+                st.write(response)
+            except Exception as e:
+                st.error(f"献立提案の生成に失敗しました: {e}")
 
 if __name__ == "__main__":
     main()
