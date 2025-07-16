@@ -65,10 +65,13 @@ def show_macro_chart(df):
 def main():
     st.title("🍱 AI栄養解析 & 献立提案アプリ")
 
-    api_key = get_api_key()
+    api_key = st.secrets.get("GEMINI_API_KEY")  # get()で安全に取得
     if not api_key:
         st.warning("APIキーを入力またはSecretsに設定してください。")
         return
+
+    # 以下は元通り...
+
 
     # Gemini API 初期化
     try:
