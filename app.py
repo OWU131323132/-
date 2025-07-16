@@ -52,6 +52,7 @@ def plot_nutrition_bar(nutrition_sum, goal_dict):
     nutrients = list(goal_dict.keys())
     goal_vals = [goal_dict[n] for n in nutrients]
     actual_vals = [nutrition_sum.get(n, 0) for n in nutrients]
+    import plotly.graph_objects as go
     fig = go.Figure()
     fig.add_trace(go.Bar(
         y=nutrients,
@@ -112,7 +113,8 @@ def main():
         if not dish_name.strip():
             st.warning("料理名を入力してください。")
         else:
-            model = genai.TextGenerationModel.from_pretrained('gemini-2.0-flash-lite')
+            # ChatModelを使う形に修正
+            model = genai.chat.ChatModel.from_pretrained("gemini-2.0-chat-bison")
 
             prompt = (
                 f"以下の料理の栄養情報を表形式で教えてください。"
@@ -121,12 +123,16 @@ def main():
                 f"Markdown形式のテーブルでお願いします。"
             )
 
-            try:
-                response = model.generate(prompt=prompt)
-                st.markdown("### 取得した栄養情報（AI出力）")
-                st.code(response.text)
+            messages = [
+                {"author": "user", "content": prompt}
+            ]
 
-                df = parse_nutrition_text(response.text)
+            try:
+                response = model.predict(messages=messages)
+                st.markdown("### 取得した栄養情報（AI出力）")
+                st.code(response.last)
+
+                df = parse_nutrition_text(response.last)
                 if df.empty:
                     st.error("AIからの栄養情報解析に失敗しました。")
                 else:
@@ -170,10 +176,13 @@ def main():
                     f"この情報をもとに、残りの食事で摂るべき献立を提案してください。\n"
                     f"ユーザーの質問:\n{user_input}"
                 )
-                model = genai.TextGenerationModel.from_pretrained('gemini-2.0-flash-lite')
-                response = model.generate(prompt=prompt)
+
+                model = genai.chat.ChatModel.from_pretrained("gemini-2.0-chat-bison")
+                messages = [{"author": "user", "content": prompt}]
+                response = model.predict(messages=messages)
+
                 st.subheader("🤖 AIの献立提案")
-                st.write(response.text)
+                st.write(response.last)
             except Exception as e:
                 st.error(f"AI献立提案の生成に失敗しました: {e}")
 
