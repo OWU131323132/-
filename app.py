@@ -2,18 +2,15 @@ import streamlit as st
 import google.generativeai as genai
 from PIL import Image
 import pandas as pd
-import plotly.express as px
+import plotly.graph_objects as go
 import re
 
-# --- APIキー取得（Secrets優先） ---
 def get_api_key():
     try:
         return st.secrets["GEMINI_API_KEY"]
     except KeyError:
         return st.text_input("Gemini APIキーを入力してください:", type="password")
 
-
-# --- AIにテキストで栄養解析依頼 ---
 def analyze_nutrition_by_text(dish_name, api_key):
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-1.5-flash')
@@ -29,27 +26,22 @@ def analyze_nutrition_by_text(dish_name, api_key):
     response = model.generate_content(prompt)
     return response.text
 
-
-# --- 解析テキストをきれいにDataFrame化 ---
 def parse_nutrition_text(text):
     lines = text.strip().splitlines()
     data = []
 
     for line in lines:
-        # パイプ記号がある行のみ処理（表行）
         if '|' not in line:
             continue
         cols = [c.strip() for c in line.strip('|').split('|')]
-        # 食材名＋4列必須
         if len(cols) < 5:
             continue
-        # 合計や目安、装飾文字はスキップ
+        # 合計や装飾文字の行を除外
         if any(x in cols[0] for x in ['合計', '目安', '**', '—', '合', '計']):
             continue
 
         name = cols[0]
 
-        # 値から「約」「単位」「**」などを除去して数値化
         def clean_value(val):
             val = val.replace('約', '').replace('g', '').replace('kcal', '')\
                      .replace('**', '').replace(',', '').strip()
@@ -79,27 +71,41 @@ def parse_nutrition_text(text):
     df = pd.DataFrame(data)
     return df
 
+def plot_macro_bar(nutrition_sum, goal_nutrition):
+    # nutrition_sum, goal_nutritionはdictまたはpd.Seriesで以下キーを持つ:
+    # 'カロリー(kcal)', 'タンパク質(g)', '脂質(g)', '炭水化物(g)'
+    categories = ['カロリー(kcal)', 'タンパク質(g)', '脂質(g)', '炭水化物(g)']
+    values = [nutrition_sum.get(cat, 0) for cat in categories]
+    goals = [goal_nutrition.get(cat, 0) for cat in categories]
+    percentages = [v/g*100 if g > 0 else 0 for v, g in zip(values, goals)]
 
-# --- マクロ栄養素の円グラフ表示 ---
-def plot_macro_pie(df):
-    if df.empty:
-        st.info("解析結果が空です。")
-        return
-    total = df[['タンパク質(g)', '脂質(g)', '炭水化物(g)']].sum().reset_index()
-    total.columns = ['栄養素', '量(g)']
-    fig = px.pie(total, names='栄養素', values='量(g)', title='マクロ栄養素割合')
+    fig = go.Figure()
+
+    fig.add_trace(go.Bar(
+        y=categories,
+        x=percentages,
+        orientation='h',
+        text=[f"{values[i]:.1f} / {goals[i]}" for i in range(len(categories))],
+        textposition='outside',
+        marker_color='dodgerblue',
+        name='達成度 (%)'
+    ))
+
+    fig.update_layout(
+        title='今日の栄養素摂取の目標達成度',
+        xaxis=dict(title='達成率 (%)', range=[0, max(110, max(percentages)*1.1)]),
+        yaxis=dict(title='栄養素'),
+        bargap=0.5,
+        height=300
+    )
     st.plotly_chart(fig, use_container_width=True)
 
-
-# --- 食事ログの栄養合計を計算 ---
 def sum_nutrition(log):
     if len(log) == 0:
         return None
     df = pd.DataFrame(log)
     return df[['カロリー(kcal)', 'タンパク質(g)', '脂質(g)', '炭水化物(g)']].sum()
 
-
-# --- AIに献立提案依頼 ---
 def generate_meal_plan(api_key, goal, nutrition_summary):
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-1.5-flash')
@@ -116,8 +122,6 @@ def generate_meal_plan(api_key, goal, nutrition_summary):
     response = model.generate_content(prompt)
     return response.text
 
-
-# --- メイン ---
 def main():
     st.set_page_config(page_title="AI栄養解析＆献立提案", layout="wide")
     st.title("🍽️ AI栄養解析＆献立提案アプリ")
@@ -140,22 +144,20 @@ def main():
         else:
             with st.spinner("AI解析中…"):
                 try:
-                    # 今回は画像解析省略し、テキスト解析で栄養推定
                     text_result = analyze_nutrition_by_text(dish_name, api_key)
                     st.subheader("AI解析結果（テキスト）")
-                    st.text(text_result)
+                    # テキストの表は隠すか折りたたみで表示
+                    with st.expander("解析用テキスト（Markdown表形式）"):
+                        st.code(text_result)
 
                     df = parse_nutrition_text(text_result)
                     if not df.empty:
                         st.subheader("解析結果（表形式）")
-                        st.dataframe(df)
-
+                        st.dataframe(df.style.format("{:.1f}"))
                         if st.button("この料理を食事履歴に追加"):
                             for _, row in df.iterrows():
                                 st.session_state.meal_log.append(row.to_dict())
                             st.success("食事履歴に追加しました！")
-
-                        plot_macro_pie(df)
                     else:
                         st.warning("解析結果の形式が不正確です。")
                 except Exception as e:
@@ -166,7 +168,7 @@ def main():
         st.info("まだ食事履歴はありません。栄養解析した料理を追加してください。")
     else:
         df_log = pd.DataFrame(st.session_state.meal_log)
-        st.dataframe(df_log)
+        st.dataframe(df_log.style.format("{:.1f}"))
 
         nutrition_sum = sum_nutrition(st.session_state.meal_log)
         if nutrition_sum is not None:
@@ -184,6 +186,41 @@ def main():
         "バランスの良い食事を取りたい"
     ])
 
+    # 目標に応じた理想栄養素（例、kcalは男女別個人差あるのでざっくり目安）
+    goal_dict = {
+        "筋肉を増やしたい": {
+            'カロリー(kcal)': 2500,
+            'タンパク質(g)': 150,
+            '脂質(g)': 70,
+            '炭水化物(g)': 300
+        },
+        "体重を減らしたい": {
+            'カロリー(kcal)': 1800,
+            'タンパク質(g)': 100,
+            '脂質(g)': 50,
+            '炭水化物(g)': 150
+        },
+        "健康的な食生活を維持したい": {
+            'カロリー(kcal)': 2000,
+            'タンパク質(g)': 120,
+            '脂質(g)': 60,
+            '炭水化物(g)': 220
+        },
+        "バランスの良い食事を取りたい": {
+            'カロリー(kcal)': 2200,
+            'タンパク質(g)': 130,
+            '脂質(g)': 65,
+            '炭水化物(g)': 250
+        }
+    }
+
+    if st.button("栄養達成度を表示"):
+        if len(st.session_state.meal_log) == 0:
+            st.warning("まず食事履歴を追加してください。")
+        else:
+            nutrition_sum = sum_nutrition(st.session_state.meal_log)
+            plot_macro_bar(nutrition_sum, goal_dict[goal])
+
     if st.button("AIに献立提案を依頼"):
         if len(st.session_state.meal_log) == 0:
             st.warning("まず食事履歴を追加してください。")
@@ -196,7 +233,6 @@ def main():
                     st.write(response)
                 except Exception as e:
                     st.error(f"献立提案の生成に失敗しました: {e}")
-
 
 if __name__ == "__main__":
     main()
