@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.express as px
 import re
 
-# --- 一日の目安栄養素（例：成人男性、修正可） ---
+# --- 一日の目安栄養素 ---
 DAILY_REQUIREMENT = {
     'エネルギー(kcal)': 2500,
     'たんぱく質(g)': 65,
@@ -18,7 +18,7 @@ DAILY_REQUIREMENT = {
     '食塩相当量(g)': 7.5
 }
 
-# --- APIキー ---
+# --- APIキー取得 ---
 def get_api_key():
     try:
         return st.secrets["GEMINI_API_KEY"]
@@ -33,12 +33,13 @@ def analyze_nutrition_by_text(dish_name, api_key):
         f"料理名「{dish_name}」の主な食材と、"
         "エネルギー(kcal)、たんぱく質(g)、脂質(g)、糖質(g)、カリウム(mg)、"
         "カルシウム(mg)、鉄(mg)、ビタミンC(mg)、食物繊維(g)、食塩相当量(g) "
-        "を表形式で教えてください。例:\n"
-        "| 食材 | エネルギー(kcal) | たんぱく質(g) | 脂質(g) | 糖質(g) | カリウム(mg) | カルシウム(mg) | 鉄(mg) | ビタミンC(mg) | 食物繊維(g) | 食塩相当量(g) |\n"
+        "を表形式で教えてください。\n"
+        "例:\n"
+        "| 食材 | エネルギー(kcal) | たんぱく質(g) | 脂質(g) | 糖質(g) | カリウム(mg) | カルシウム(mg) | 鉄(mg) | ビタミンC(mg) | 食物繊維(g) | 食塩相当量(g) |"
     )
     return model.generate_content(prompt).text
 
-# --- 解析テキストをDataFrame化 ---
+# --- DataFrame化 ---
 def parse_nutrition_text(text):
     lines = text.strip().splitlines()
     data = []
@@ -139,6 +140,10 @@ def main():
             meal['料理名'] = st.session_state.current_dish
             st.session_state.meal_log.append(meal)
             st.success("追加しました！")
+
+            # 解析結果リセット
+            st.session_state.current_df = None
+            st.session_state.current_dish = ""
 
     st.header("🍴 食事履歴")
     if st.session_state.meal_log:
