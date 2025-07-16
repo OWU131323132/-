@@ -1,6 +1,5 @@
 import streamlit as st
 import google.generativeai as genai
-import matplotlib.pyplot as plt
 import pandas as pd
 
 # APIキー取得
@@ -21,14 +20,13 @@ def analyze_nutrition(dish_name, api_key):
 # 栄養成分のパース
 def parse_nutrition(text):
     data = {}
+    import re
     for line in text.split('\n'):
         for nutrient in ["エネルギー", "たんぱく質", "脂質", "糖質", "カリウム"]:
             if nutrient in line:
-                try:
-                    value = float(''.join(filter(str.isdigit, line)))
-                    data[nutrient] = value
-                except:
-                    pass
+                match = re.search(r"([0-9]+\.?[0-9]*)", line)
+                if match:
+                    data[nutrient] = float(match.group(1))
     return data
 
 # 食事履歴の保存
@@ -43,16 +41,13 @@ def display_history():
         st.subheader("食事履歴")
         df = pd.DataFrame(st.session_state.history)
         st.dataframe(df)
-        
-        # グラフ描画
-        st.subheader("摂取量のグラフ")
+
+        # 摂取量合計を計算
         nutrients = ["エネルギー", "たんぱく質", "脂質", "糖質", "カリウム"]
         totals = df[nutrients].sum()
 
-        plt.figure(figsize=(6,4))
-        plt.bar(totals.index, totals.values, color="skyblue")
-        plt.ylabel("合計摂取量")
-        st.pyplot(plt)
+        st.subheader("摂取量のグラフ")
+        st.bar_chart(totals)
     else:
         st.write("食事履歴がありません。")
 
@@ -62,6 +57,7 @@ def main():
 
     api_key = get_api_key()
     if not api_key:
+        st.info("APIキーを入力してください。")
         st.stop()
 
     st.header("料理の栄養解析")
@@ -92,14 +88,15 @@ def main():
 
     if st.session_state.history:
         df = pd.DataFrame(st.session_state.history)
-        totals = df[["エネルギー", "たんぱく質", "脂質", "糖質", "カリウム"]].sum()
+        nutrients = ["エネルギー", "たんぱく質", "脂質", "糖質", "カリウム"]
+        totals = df[nutrients].sum()
 
-        fig, ax = plt.subplots(figsize=(6,4))
-        ax.bar(totals.index, totals.values, label="摂取量", alpha=0.7)
-        ax.bar(target.keys(), target.values(), label="目標値", alpha=0.3)
-        ax.legend()
-        ax.set_ylabel("gまたはmg")
-        st.pyplot(fig)
+        df_compare = pd.DataFrame({
+            "摂取量": totals,
+            "目標量": pd.Series(target)
+        })
+        st.subheader("摂取量と目標量の比較グラフ")
+        st.bar_chart(df_compare)
 
 if __name__ == "__main__":
     main()
