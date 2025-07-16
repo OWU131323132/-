@@ -64,12 +64,10 @@ def parse_nutrition_text(text):
             continue
     return pd.DataFrame(data)
 
-def display_totals(df):
-    total = df.drop(columns=['食材']).sum()
+def display_totals(total):
     st.write("#### この料理の栄養合計")
     for k, v in total.items():
         st.write(f"{k}: {v:.1f}")
-    return total
 
 def compare_to_daily(total_sum):
     st.write("#### 一日摂取目安量との比較")
@@ -105,6 +103,7 @@ def main():
     if "current_df" not in st.session_state:
         st.session_state.current_df = None
         st.session_state.current_dish = ""
+        st.session_state.current_total = None
         st.session_state.show_result = False
 
     dish_name = st.text_input("料理名を入力")
@@ -116,23 +115,28 @@ def main():
             st.warning("解析失敗")
         else:
             st.session_state.current_df = df
+            st.session_state.current_total = df.drop(columns=['食材']).sum()
             st.session_state.show_result = True
             st.success("解析完了！")
 
+    # ✅ 解析結果とtotalがあるときだけ表示
     if st.session_state.show_result and st.session_state.current_df is not None:
         st.subheader("解析結果")
         st.dataframe(st.session_state.current_df)
 
-        total = display_totals(st.session_state.current_df)
-        compare_to_daily(total)
+        display_totals(st.session_state.current_total)
+        compare_to_daily(st.session_state.current_total)
 
         if st.button("食事履歴に追加"):
-            meal = total.to_dict()
+            meal = st.session_state.current_total.to_dict()
             meal['料理名'] = st.session_state.current_dish
             st.session_state.meal_log.append(meal)
             st.success("食事履歴に追加しました！")
+
+            # ✅ 全部リセット
             st.session_state.current_df = None
             st.session_state.current_dish = ""
+            st.session_state.current_total = None
             st.session_state.show_result = False
 
     st.header("🍴 食事履歴")
@@ -144,7 +148,6 @@ def main():
         for k, v in sum_today.items():
             if k != '料理名':
                 st.write(f"{k}: {v:.1f} / {DAILY_REQUIREMENT.get(k, '不明')}")
-
         compare_to_daily(sum_today)
     else:
         st.info("まだ食事履歴はありません")
