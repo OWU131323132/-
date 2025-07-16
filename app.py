@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.express as px
 import re
 
-# --- 一日の目安栄養素 ---
+# 一日目安量（例：成人男性）
 DAILY_REQUIREMENT = {
     'エネルギー(kcal)': 2500,
     'たんぱく質(g)': 65,
@@ -18,14 +18,14 @@ DAILY_REQUIREMENT = {
     '食塩相当量(g)': 7.5
 }
 
-# --- APIキー取得 ---
+# APIキー
 def get_api_key():
     try:
         return st.secrets["GEMINI_API_KEY"]
     except KeyError:
         return st.text_input("Gemini APIキー:", type="password")
 
-# --- 栄養解析 ---
+# 栄養解析
 def analyze_nutrition_by_text(dish_name, api_key):
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-1.5-flash')
@@ -33,13 +33,12 @@ def analyze_nutrition_by_text(dish_name, api_key):
         f"料理名「{dish_name}」の主な食材と、"
         "エネルギー(kcal)、たんぱく質(g)、脂質(g)、糖質(g)、カリウム(mg)、"
         "カルシウム(mg)、鉄(mg)、ビタミンC(mg)、食物繊維(g)、食塩相当量(g) "
-        "を表形式で教えてください。\n"
-        "例:\n"
-        "| 食材 | エネルギー(kcal) | たんぱく質(g) | 脂質(g) | 糖質(g) | カリウム(mg) | カルシウム(mg) | 鉄(mg) | ビタミンC(mg) | 食物繊維(g) | 食塩相当量(g) |"
+        "を表形式で教えてください。例:\n"
+        "| 食材 | エネルギー(kcal) | たんぱく質(g) | 脂質(g) | 糖質(g) | カリウム(mg) | カルシウム(mg) | 鉄(mg) | ビタミンC(mg) | 食物繊維(g) | 食塩相当量(g) |\n"
     )
     return model.generate_content(prompt).text
 
-# --- DataFrame化 ---
+# 解析テキストDataFrame化
 def parse_nutrition_text(text):
     lines = text.strip().splitlines()
     data = []
@@ -70,7 +69,7 @@ def parse_nutrition_text(text):
             continue
     return pd.DataFrame(data)
 
-# --- 合計表示 ---
+# 栄養合計表示
 def display_totals(df):
     total = df.drop(columns=['食材']).sum()
     st.write("#### この料理の栄養合計")
@@ -78,7 +77,7 @@ def display_totals(df):
         st.write(f"{k}: {v:.1f}")
     return total
 
-# --- 一日目安と比較 ---
+# 一日目安比較
 def compare_to_daily(total_sum):
     st.write("#### 一日摂取目安量との比較")
     for key, target in DAILY_REQUIREMENT.items():
@@ -86,13 +85,13 @@ def compare_to_daily(total_sum):
         percent = (actual / target) * 100 if target > 0 else 0
         st.write(f"{key}: {actual:.1f} / {target} （{percent:.1f}%）")
 
-# --- 合計栄養計算 ---
+# 合計栄養
 def sum_nutrition(log):
     if not log: return None
     df = pd.DataFrame(log)
     return df.drop(columns=['料理名']).sum()
 
-# --- AI献立 ---
+# AI献立
 def generate_meal_plan(api_key, goal, total_sum):
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-1.5-flash')
@@ -103,10 +102,10 @@ def generate_meal_plan(api_key, goal, total_sum):
     )
     return model.generate_content(prompt).text
 
-# --- メイン ---
+# メイン
 def main():
-    st.set_page_config(page_title="AI栄養解析・献立", layout="wide")
-    st.title("🥗 AI栄養解析＆一日目安付き献立提案")
+    st.set_page_config(page_title="AI栄養解析＆献立提案", layout="wide")
+    st.title("🍽️ AI栄養解析＆一日目安付き献立提案")
 
     api_key = get_api_key()
     if not api_key: return
@@ -114,7 +113,8 @@ def main():
     if "meal_log" not in st.session_state:
         st.session_state.meal_log = []
     if "current_df" not in st.session_state:
-        st.session_state.current_df, st.session_state.current_dish = None, ""
+        st.session_state.current_df = None
+        st.session_state.current_dish = ""
 
     dish_name = st.text_input("料理名を入力")
     if st.button("解析する"):
@@ -139,11 +139,13 @@ def main():
             meal = total.to_dict()
             meal['料理名'] = st.session_state.current_dish
             st.session_state.meal_log.append(meal)
-            st.success("追加しました！")
+            st.success("食事履歴に追加しました！")
 
-            # 解析結果リセット
+            # 🔴 解析結果をリセット（解析画面消える）
             st.session_state.current_df = None
             st.session_state.current_dish = ""
+
+            st.experimental_rerun()
 
     st.header("🍴 食事履歴")
     if st.session_state.meal_log:
