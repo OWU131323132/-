@@ -1,165 +1,105 @@
 import streamlit as st
 import google.generativeai as genai
+import matplotlib.pyplot as plt
 import pandas as pd
-import re
 
-DAILY_REQUIREMENT = {
-    'エネルギー(kcal)': 2500,
-    'たんぱく質(g)': 65,
-    '脂質(g)': 70,
-    '糖質(g)': 330,
-    'カリウム(mg)': 2500,
-    'カルシウム(mg)': 800,
-    '鉄(mg)': 7.0,
-    'ビタミンC(mg)': 100,
-    '食物繊維(g)': 21,
-    '食塩相当量(g)': 7.5
-}
-
+# APIキー取得
 def get_api_key():
     try:
         return st.secrets["GEMINI_API_KEY"]
     except KeyError:
         return st.text_input("Gemini APIキー:", type="password")
 
-def analyze_nutrition_by_text(dish_name, api_key):
+# Gemini APIによる栄養解析
+def analyze_nutrition(dish_name, api_key):
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    prompt = (
-        f"料理名「{dish_name}」の主な食材と、"
-        "エネルギー(kcal)、たんぱく質(g)、脂質(g)、糖質(g)、カリウム(mg)、"
-        "カルシウム(mg)、鉄(mg)、ビタミンC(mg)、食物繊維(g)、食塩相当量(g) "
-        "を表形式で教えてください。例:\n"
-        "| 食材 | エネルギー(kcal) | たんぱく質(g) | 脂質(g) | 糖質(g) | カリウム(mg) | カルシウム(mg) | 鉄(mg) | ビタミンC(mg) | 食物繊維(g) | 食塩相当量(g) |\n"
-    )
-    return model.generate_content(prompt).text
+    model = genai.GenerativeModel("gemini-pro")
+    prompt = f"{dish_name}の栄養成分（エネルギー、たんぱく質、脂質、糖質、カリウム）を具体的な数値で教えてください。単位もつけてください。"
+    response = model.generate_content(prompt)
+    return response.text
 
-def parse_nutrition_text(text):
-    lines = text.strip().splitlines()
-    data = []
-    for line in lines:
-        if '|' not in line: continue
-        cols = [c.strip() for c in line.strip('|').split('|')]
-        if len(cols) < 11: continue
-        name = cols[0]
-        def clean(val):
-            val = re.sub(r"[^\d\.]", "", val)
-            return float(val) if val else 0.0
-        try:
-            values = [clean(x) for x in cols[1:11]]
-            data.append({
-                '食材': name,
-                'エネルギー(kcal)': values[0],
-                'たんぱく質(g)': values[1],
-                '脂質(g)': values[2],
-                '糖質(g)': values[3],
-                'カリウム(mg)': values[4],
-                'カルシウム(mg)': values[5],
-                '鉄(mg)': values[6],
-                'ビタミンC(mg)': values[7],
-                '食物繊維(g)': values[8],
-                '食塩相当量(g)': values[9],
-            })
-        except:
-            continue
-    return pd.DataFrame(data)
+# 栄養成分のパース
+def parse_nutrition(text):
+    data = {}
+    for line in text.split('\n'):
+        for nutrient in ["エネルギー", "たんぱく質", "脂質", "糖質", "カリウム"]:
+            if nutrient in line:
+                try:
+                    value = float(''.join(filter(str.isdigit, line)))
+                    data[nutrient] = value
+                except:
+                    pass
+    return data
 
-def display_totals(total):
-    st.write("#### この料理の栄養合計")
-    for k, v in total.items():
-        st.write(f"{k}: {v:.1f}")
+# 食事履歴の保存
+if "history" not in st.session_state:
+    st.session_state.history = []
 
-def compare_to_daily(total_sum):
-    st.write("#### 一日摂取目安量との比較")
-    for key, target in DAILY_REQUIREMENT.items():
-        actual = total_sum.get(key, 0)
-        percent = (actual / target) * 100 if target > 0 else 0
-        st.write(f"{key}: {actual:.1f} / {target} （{percent:.1f}%）")
+def add_to_history(entry):
+    st.session_state.history.append(entry)
 
-def sum_nutrition(log):
-    if not log: return None
-    df = pd.DataFrame(log)
-    return df.drop(columns=['料理名']).sum()
+def display_history():
+    if st.session_state.history:
+        st.subheader("食事履歴")
+        df = pd.DataFrame(st.session_state.history)
+        st.dataframe(df)
+        
+        # グラフ描画
+        st.subheader("摂取量のグラフ")
+        nutrients = ["エネルギー", "たんぱく質", "脂質", "糖質", "カリウム"]
+        totals = df[nutrients].sum()
 
-def generate_meal_plan(api_key, goal, total_sum):
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    prompt = (
-        "私は今日以下の栄養を摂取しました：\n" +
-        "\n".join([f"{k}: {v:.1f}" for k, v in total_sum.items()]) +
-        f"\n目標は「{goal}」。この目標に合う残りの食事提案をお願いします。"
-    )
-    return model.generate_content(prompt).text
+        plt.figure(figsize=(6,4))
+        plt.bar(totals.index, totals.values, color="skyblue")
+        plt.ylabel("合計摂取量")
+        st.pyplot(plt)
+    else:
+        st.write("食事履歴がありません。")
 
+# メインアプリ
 def main():
-    st.set_page_config(page_title="AI栄養解析＆献立提案", layout="wide")
-    st.title("🍽️ AI栄養解析＆一日目安付き献立提案")
+    st.title("AI栄養解析＆献立提案アプリ")
 
     api_key = get_api_key()
-    if not api_key: return
+    if not api_key:
+        st.stop()
 
-    if "meal_log" not in st.session_state:
-        st.session_state.meal_log = []
-    if "current_df" not in st.session_state:
-        st.session_state.current_df = None
-        st.session_state.current_dish = ""
-        st.session_state.current_total = None
-        st.session_state.show_result = False
+    st.header("料理の栄養解析")
+    dish_name = st.text_input("料理名を入力:")
 
-    dish_name = st.text_input("料理名を入力")
-    if st.button("解析する"):
-        st.session_state.current_dish = dish_name
-        text = analyze_nutrition_by_text(dish_name, api_key)
-        df = parse_nutrition_text(text)
-        if df.empty:
-            st.warning("解析失敗")
-        else:
-            st.session_state.current_df = df
-            st.session_state.current_total = df.drop(columns=['食材']).sum()
-            st.session_state.show_result = True
-            st.success("解析完了！")
+    if dish_name:
+        with st.spinner("AIが解析中..."):
+            result = analyze_nutrition(dish_name, api_key)
+            st.subheader("AI解析結果")
+            st.write(result)
 
-    # ✅ 解析結果とtotalがあるときだけ表示
-    if st.session_state.show_result and st.session_state.current_df is not None:
-        st.subheader("解析結果")
-        st.dataframe(st.session_state.current_df)
+            nutrition_data = parse_nutrition(result)
+            if nutrition_data:
+                st.subheader("解析データ")
+                st.write(nutrition_data)
 
-        display_totals(st.session_state.current_total)
-        compare_to_daily(st.session_state.current_total)
+                if st.button("食事履歴に追加"):
+                    entry = {"料理名": dish_name}
+                    entry.update(nutrition_data)
+                    add_to_history(entry)
+                    st.success("食事履歴に追加しました！")
 
-        if st.button("食事履歴に追加"):
-            meal = st.session_state.current_total.to_dict()
-            meal['料理名'] = st.session_state.current_dish
-            st.session_state.meal_log.append(meal)
-            st.success("食事履歴に追加しました！")
+    display_history()
 
-            # ✅ 全部リセット
-            st.session_state.current_df = None
-            st.session_state.current_dish = ""
-            st.session_state.current_total = None
-            st.session_state.show_result = False
+    st.header("目標摂取量との比較")
+    target = {"エネルギー": 2000, "たんぱく質": 100, "脂質": 60, "糖質": 250, "カリウム": 3500}
+    st.write("一日目標摂取量:", target)
 
-    st.header("🍴 食事履歴")
-    if st.session_state.meal_log:
-        df_log = pd.DataFrame(st.session_state.meal_log)
-        st.dataframe(df_log)
-        sum_today = sum_nutrition(st.session_state.meal_log)
-        st.write("### 今日の累計")
-        for k, v in sum_today.items():
-            if k != '料理名':
-                st.write(f"{k}: {v:.1f} / {DAILY_REQUIREMENT.get(k, '不明')}")
-        compare_to_daily(sum_today)
-    else:
-        st.info("まだ食事履歴はありません")
+    if st.session_state.history:
+        df = pd.DataFrame(st.session_state.history)
+        totals = df[["エネルギー", "たんぱく質", "脂質", "糖質", "カリウム"]].sum()
 
-    st.header("🎯 目標設定＆献立提案")
-    goal = st.selectbox("目標選択", ["筋肉を増やしたい", "体重を減らしたい", "バランスの良い食事"])
-    if st.button("AI献立提案"):
-        sum_today = sum_nutrition(st.session_state.meal_log) or pd.Series({k: 0.0 for k in DAILY_REQUIREMENT})
-        with st.spinner("提案生成中…"):
-            response = generate_meal_plan(api_key, goal, sum_today)
-            st.subheader("🤖 AIの献立提案")
-            st.write(response)
+        fig, ax = plt.subplots(figsize=(6,4))
+        ax.bar(totals.index, totals.values, label="摂取量", alpha=0.7)
+        ax.bar(target.keys(), target.values(), label="目標値", alpha=0.3)
+        ax.legend()
+        ax.set_ylabel("gまたはmg")
+        st.pyplot(fig)
 
 if __name__ == "__main__":
     main()
