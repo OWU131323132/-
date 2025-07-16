@@ -130,9 +130,8 @@ def main():
     if "meal_log" not in st.session_state:
         st.session_state.meal_log = []
 
-    st.header("1. 料理名入力で栄養解析（写真は任意）")
+    st.header("1. 料理名入力で栄養解析")
     dish_name = st.text_input("料理名を入力してください（例：親子丼）")
-    uploaded = st.file_uploader("料理写真（任意）", type=["jpg", "jpeg", "png"])
 
     if st.button("栄養解析する"):
         if not dish_name.strip():
@@ -149,9 +148,16 @@ def main():
                         st.subheader("解析結果（表形式）")
                         st.dataframe(df)
 
+                        total = df[['カロリー(kcal)', 'タンパク質(g)', '脂質(g)', '炭水化物(g)']].sum()
+
                         if st.button("この料理を食事履歴に追加"):
-                            for _, row in df.iterrows():
-                                st.session_state.meal_log.append(row.to_dict())
+                            st.session_state.meal_log.append({
+                                '料理名': dish_name,
+                                'カロリー(kcal)': total['カロリー(kcal)'],
+                                'タンパク質(g)': total['タンパク質(g)'],
+                                '脂質(g)': total['脂質(g)'],
+                                '炭水化物(g)': total['炭水化物(g)']
+                            })
                             st.success("食事履歴に追加しました！")
 
                         plot_macro_pie(df)
