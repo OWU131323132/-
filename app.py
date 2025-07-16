@@ -1,182 +1,138 @@
 import streamlit as st
 import google.generativeai as genai
-from PIL import Image
 import pandas as pd
 import plotly.express as px
 import re
 
-# --- APIキー取得 ---
 def get_api_key():
     try:
         return st.secrets["GEMINI_API_KEY"]
     except KeyError:
         return st.text_input("Gemini APIキーを入力してください:", type="password")
 
-# --- 栄養解析 ---
-def analyze_nutrition_by_text(dish_name, api_key):
+# AIに細かく指示
+def analyze_nutrition_with_rda(dish_name, api_key):
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-1.5-flash')
     prompt = (
-        f"料理名「{dish_name}」の主な食材と、"
-        "カロリー(kcal)、タンパク質(g)、脂質(g)、炭水化物(g)を表形式で教えてください。\n"
-        "例:\n"
-        "| 食材 | カロリー(kcal) | タンパク質(g) | 脂質(g) | 炭水化物(g) |\n"
-        "|---------------|----------------|---------------|---------|-------------|\n"
-        "| りんご | 52 | 0.3 | 0.2 | 14 |\n"
-        "| バナナ | 89 | 1.1 | 0.3 | 23 |"
+        f"料理名「{dish_name}」の主な食材と、以下の栄養素を表形式で出してください：\n"
+        "エネルギー(kcal)、たんぱく質(g)、脂質(g)、糖質(g)、カリウム(mg)、カルシウム(mg)、鉄(mg)、ビタミン総量(mg)、食物繊維(g)、塩分(g)。\n"
+        "さらに、日本の成人男性（30歳〜49歳）の1日推奨摂取量も同じ栄養素で教えてください。\n"
+        "【例】\n"
+        "| 食材 | エネルギー(kcal) | たんぱく質(g) | 脂質(g) | 糖質(g) | カリウム(mg) | カルシウム(mg) | 鉄(mg) | ビタミン総量(mg) | 食物繊維(g) | 塩分(g) |\n"
+        "| 鶏肉 | 150 | 20 | 10 | 0 | 300 | 20 | 1.0 | 0.5 | 0 | 0.5 |\n"
+        "\n"
+        "【1日推奨量】\n"
+        "| 栄養素 | 推奨量 |\n"
+        "| エネルギー | 2600 kcal |\n"
+        "| たんぱく質 | 65 g |\n"
+        "| 脂質 | 70 g |\n"
+        "| 糖質 | 330 g |\n"
+        "| カリウム | 2500 mg |\n"
+        "| カルシウム | 750 mg |\n"
+        "| 鉄 | 7.5 mg |\n"
+        "| ビタミン総量 | 100 mg |\n"
+        "| 食物繊維 | 21 g |\n"
+        "| 塩分 | 7.5 g |"
     )
     response = model.generate_content(prompt)
     return response.text
 
-# --- 解析結果からDataFrame ---
-def parse_nutrition_text(text):
-    lines = text.strip().splitlines()
-    data = []
+def parse_tables(text):
+    lines = [line.strip() for line in text.splitlines() if "|" in line]
+    food_data, rda_data = [], []
+    rda_mode = False
+
     for line in lines:
-        if '|' not in line:
+        if "【1日推奨量】" in line:
+            rda_mode = True
             continue
         cols = [c.strip() for c in line.strip('|').split('|')]
-        if len(cols) < 5:
+        if len(cols) < 2:
             continue
-        if any(x in cols[0] for x in ['合計', '目安', '**', '—', '合', '計']):
-            continue
-        name = cols[0]
+        if rda_mode:
+            if len(cols) == 2:
+                rda_data.append(cols)
+        else:
+            if len(cols) >= 11 and cols[0] != "食材":
+                food_data.append(cols)
 
-        def clean_value(val):
-            val = val.replace('約', '').replace('g', '').replace('kcal', '')\
-                     .replace('**', '').replace(',', '').strip()
-            m = re.search(r'[\d\.]+', val)
-            return float(m.group()) if m else 0.0
+    food_columns = ['食材', 'エネルギー(kcal)', 'たんぱく質(g)', '脂質(g)', '糖質(g)',
+                    'カリウム(mg)', 'カルシウム(mg)', '鉄(mg)', 'ビタミン総量(mg)', '食物繊維(g)', '塩分(g)']
+    df_food = pd.DataFrame(food_data, columns=food_columns)
 
-        try:
-            calories = clean_value(cols[1])
-            protein = clean_value(cols[2])
-            fat = clean_value(cols[3])
-            carb = clean_value(cols[4])
-        except:
-            continue
+    for col in food_columns[1:]:
+        df_food[col] = pd.to_numeric(df_food[col], errors='coerce').fillna(0)
 
-        data.append({
-            '食材': name,
-            'カロリー(kcal)': calories,
-            'タンパク質(g)': protein,
-            '脂質(g)': fat,
-            '炭水化物(g)': carb
-        })
+    df_rda = pd.DataFrame(rda_data, columns=['栄養素', '推奨量'])
+    df_rda['推奨量'] = df_rda['推奨量'].str.replace('kcal', '').str.replace('g', '').str.replace('mg', '').astype(float)
 
-    return pd.DataFrame(data)
+    return df_food, df_rda
 
-# --- 円グラフ ---
-def plot_macro_pie(df):
-    if df.empty:
-        st.info("解析結果が空です。")
-        return
-    total = df[['タンパク質(g)', '脂質(g)', '炭水化物(g)']].sum().reset_index()
-    total.columns = ['栄養素', '量(g)']
-    fig = px.pie(total, names='栄養素', values='量(g)', title='マクロ栄養素割合')
+def sum_nutrients(df):
+    total = df.drop(columns=['食材']).sum().reset_index()
+    total.columns = ['栄養素', '摂取量']
+    return total
+
+def plot_comparison_chart(total, rda_df):
+    merged = pd.merge(total, rda_df, left_on='栄養素', right_on='栄養素', how='left')
+    merged = merged.dropna()
+    merged['摂取率(%)'] = (merged['摂取量'] / merged['推奨量']) * 100
+
+    st.subheader("✅ 摂取量 vs 推奨量")
+    st.dataframe(merged[['栄養素', '摂取量', '推奨量', '摂取率(%)']])
+
+    fig = px.bar(merged, x='栄養素', y='摂取率(%)', title="推奨量達成率（%）", range_y=[0, 150], color='摂取率(%)', color_continuous_scale='Blues')
     st.plotly_chart(fig, use_container_width=True)
 
-# --- 栄養素合計 ---
-def sum_nutrition(log):
-    if not log:
-        return None
-    df = pd.DataFrame(log)
-    return df[['カロリー(kcal)', 'タンパク質(g)', '脂質(g)', '炭水化物(g)']].sum()
-
-# --- 献立提案 ---
-def generate_meal_plan(api_key, goal, nutrition_summary):
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    prompt = (
-        f"私は今日これまでに以下の栄養素を摂取しました：\n"
-        f"カロリー: {nutrition_summary['カロリー(kcal)']:.1f} kcal、"
-        f"タンパク質: {nutrition_summary['タンパク質(g)']:.1f} g、"
-        f"脂質: {nutrition_summary['脂質(g)']:.1f} g、"
-        f"炭水化物: {nutrition_summary['炭水化物(g)']:.1f} g。\n"
-        f"目標は「{goal}」です。"
-        "この目標に合う今日の残りの食事のおすすめ献立を提案してください。"
-    )
-    return model.generate_content(prompt).text
-
-# --- メイン ---
 def main():
-    st.set_page_config(page_title="AI栄養解析＆献立提案", layout="wide")
-    st.title("🍽️ AI栄養解析＆献立提案アプリ")
+    st.set_page_config(page_title="AI栄養解析 RDA対応版", layout="wide")
+    st.title("🍽️ AI栄養解析＆1日推奨摂取量比較")
 
     api_key = get_api_key()
     if not api_key:
-        st.warning("APIキーを設定してください。")
+        st.warning("APIキーを設定してください")
         return
 
-    # セッション状態初期化
     if "meal_log" not in st.session_state:
         st.session_state.meal_log = []
-    if "current_df" not in st.session_state:
-        st.session_state.current_df = None
-        st.session_state.current_dish = ""
 
-    # 栄養解析
-    st.header("1. 料理名入力で栄養解析")
-    dish_name = st.text_input("料理名を入力（例：親子丼）")
+    dish = st.text_input("料理名を入力（例：親子丼）")
+    if st.button("AI解析実行"):
+        if dish.strip():
+            with st.spinner("AI解析中..."):
+                result = analyze_nutrition_with_rda(dish, api_key)
+                df_food, df_rda = parse_tables(result)
+                st.session_state.last_df_food = df_food
+                st.session_state.last_df_rda = df_rda
+                st.success("解析完了！")
+                st.text(result)
 
-    if st.button("栄養解析する"):
-        if not dish_name.strip():
-            st.warning("料理名を入力してください。")
-        else:
-            with st.spinner("AI解析中…"):
-                text_result = analyze_nutrition_by_text(dish_name, api_key)
-                df = parse_nutrition_text(text_result)
-                if df.empty:
-                    st.warning("解析に失敗しました。")
-                else:
-                    st.session_state.current_df = df
-                    st.session_state.current_dish = dish_name
-                    st.success("解析完了！")
-                    st.text(text_result)
+    if "last_df_food" in st.session_state:
+        st.subheader("解析結果（料理の栄養素）")
+        st.dataframe(st.session_state.last_df_food)
 
-    if st.session_state.current_df is not None:
-        st.subheader("解析結果（表形式）")
-        st.dataframe(st.session_state.current_df)
-        plot_macro_pie(st.session_state.current_df)
+        total = sum_nutrients(st.session_state.last_df_food)
+        st.subheader("料理の栄養素 合計")
+        st.dataframe(total)
 
-        if st.button("この料理を食事履歴に追加"):
-            total = st.session_state.current_df[['カロリー(kcal)', 'タンパク質(g)', '脂質(g)', '炭水化物(g)']].sum()
-            st.session_state.meal_log.append({
-                '料理名': st.session_state.current_dish,
-                'カロリー(kcal)': total['カロリー(kcal)'],
-                'タンパク質(g)': total['タンパク質(g)'],
-                '脂質(g)': total['脂質(g)'],
-                '炭水化物(g)': total['炭水化物(g)']
-            })
-            st.success("食事履歴に追加しました！")
+        st.subheader("1日推奨量 (RDA)")
+        st.dataframe(st.session_state.last_df_rda)
 
-    # 食事履歴
-    st.header("2. 食事履歴")
-    if not st.session_state.meal_log:
-        st.info("まだ食事履歴はありません。")
-    else:
+        plot_comparison_chart(total, st.session_state.last_df_rda)
+
+        if st.button("食事履歴に追加"):
+            row = total.set_index('栄養素')['摂取量'].to_dict()
+            row['料理名'] = dish
+            st.session_state.meal_log.append(row)
+            st.success("追加しました")
+
+    st.header("🍽️ 食事履歴")
+    if st.session_state.meal_log:
         df_log = pd.DataFrame(st.session_state.meal_log)
         st.dataframe(df_log)
-
-        nutrition_sum = sum_nutrition(st.session_state.meal_log)
-        st.write("### 今日の摂取合計")
-        st.write(f"カロリー: {nutrition_sum['カロリー(kcal)']:.1f} kcal")
-        st.write(f"タンパク質: {nutrition_sum['タンパク質(g)']:.1f} g")
-        st.write(f"脂質: {nutrition_sum['脂質(g)']:.1f} g")
-        st.write(f"炭水化物: {nutrition_sum['炭水化物(g)']:.1f} g")
-
-    # 献立提案
-    st.header("3. 目標設定＆AI献立提案")
-    goal = st.selectbox("目標を選択", ["筋肉を増やしたい", "体重を減らしたい", "健康的な食生活を維持したい", "バランスの良い食事を取りたい"])
-
-    if st.button("AIに献立提案を依頼"):
-        nutrition_sum = sum_nutrition(st.session_state.meal_log)
-        if nutrition_sum is None:
-            nutrition_sum = {'カロリー(kcal)': 0, 'タンパク質(g)': 0, '脂質(g)': 0, '炭水化物(g)': 0}
-        with st.spinner("献立提案中…"):
-            result = generate_meal_plan(api_key, goal, nutrition_sum)
-            st.subheader("🤖 AIの献立提案")
-            st.write(result)
+    else:
+        st.info("まだ履歴がありません")
 
 if __name__ == "__main__":
     main()
