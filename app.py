@@ -4,81 +4,116 @@ from PIL import Image
 import pandas as pd
 import plotly.express as px
 
+# --- APIキーの取得 ---
 def get_api_key():
-    if "GEMINI_API_KEY" in st.secrets:
+    try:
+        # 正しい方法：Secretsから取得
         return st.secrets["GEMINI_API_KEY"]
-    return st.text_input("Gemini APIキーを入力してください:", type="password")
+    except KeyError:
+        # Secrets未設定ならユーザー入力を許可
+        return st.text_input(
+            "Gemini APIキーを入力してください:",
+            type="password",
+            help="Google AI Studioで取得したAPIキーを入力してください"
+        )
 
+# --- 画像をGeminiに解析させる ---
 def analyze_image_with_gemini(image_file, api_key):
     genai.configure(api_key=api_key)
-    model = genai.GenerateModel('gemini-2.0-flash-lite')
-    img_bytes = image_file.getvalue()
-    image_parts = [{"mime_type": image_file.type, "data": img_bytes}]
-    prompt = (
-        "以下の料理画像を見て、主な食材と概算カロリー、"
-        "タンパク質・脂質・炭水化物の数値を表形式で教えてください。"
-    )
-    resp = model.generate_content([prompt, image_parts[0]])
-    return resp.text
+    model = genai.GenerativeModel('gemini-1.5-flash')  # または 'gemini-1.0-pro' など
+    image_bytes = image_file.getvalue()
+    image_data = {"mime_type": image_file.type, "data": image_bytes}
 
-def parse_nutrition_text_to_df(nutrition_text):
-    # 「食材：カロリー、タンパク質、脂質、炭水化物」形式のテキストを抽出して DF 化
-    lines = [l for l in nutrition_text.splitlines() if ":" in l and "g" in l]
+    prompt = (
+        "この料理画像に含まれる食材を特定し、次の形式で栄養情報を出力してください：\n\n"
+        "食材：カロリー (kcal), タンパク質 (g), 脂質 (g), 炭水化物 (g)\n\n"
+        "例：\n"
+        "りんご：52 kcal, 0.3 g, 0.2 g, 14 g\n"
+        "バナナ：89 kcal, 1.1 g, 0.3 g, 23 g"
+    )
+
+    response = model.generate_content([prompt, image_data])
+    return response.text
+
+# --- AI出力のテキストをDataFrameに変換 ---
+def parse_nutrition_text_to_df(text):
+    lines = [line for line in text.splitlines() if "：" in line and "kcal" in line]
     data = []
     for line in lines:
-        name, rest = line.split("：", 1)
-        nums = [float(s.strip().replace("g","").replace("kcal",""))
-                for s in rest.replace("kcal","").split(",")]
-        if len(nums) >= 4:
-            cal, prot, fat, carb = nums[:4]
-            data.append({"food": name, "cal": cal, "protein": prot, "fat": fat, "carb": carb})
+        try:
+            name, rest = line.split("：")
+            parts = rest.replace("kcal", "").replace("g", "").replace(" ", "").split(",")
+            if len(parts) == 4:
+                cal, protein, fat, carbs = map(float, parts)
+                data.append({
+                    "食材": name,
+                    "カロリー": cal,
+                    "タンパク質": protein,
+                    "脂質": fat,
+                    "炭水化物": carbs
+                })
+        except:
+            continue
     return pd.DataFrame(data)
 
-def show_macro_charts(df):
-    df_sum = df[["protein","fat","carb"]].sum().reset_index()
-    df_sum.columns = ["macro","value"]
-    fig = px.pie(df_sum, names="macro", values="value", title="マクロ栄養素割合")
+# --- 栄養バランスを円グラフで表示 ---
+def show_macro_chart(df):
+    if df.empty:
+        return
+    total = df[["タンパク質", "脂質", "炭水化物"]].sum().reset_index()
+    total.columns = ["栄養素", "量 (g)"]
+    fig = px.pie(total, names="栄養素", values="量 (g)", title="マクロ栄養バランス")
     st.plotly_chart(fig, use_container_width=True)
 
+# --- メイン処理 ---
 def main():
-    st.title("🍱 料理画像で栄養解析＆AI献立提案")
+    st.title("🍱 AI栄養解析 & 献立提案アプリ")
+
     api_key = get_api_key()
     if not api_key:
-        st.warning("APIキーを設定してください。")
+        st.warning("APIキーを入力またはSecretsに設定してください。")
         return
 
-    uploaded = st.file_uploader("料理写真をアップロードしてください", type=["jpg","png"])
-    if not uploaded:
-        st.info("まず画像をアップロードしてください。")
-    else:
-        st.image(uploaded, use_column_width=True, caption="アップロード画像")
-        with st.spinner("解析中…"):
-            text = analyze_image_with_gemini(uploaded, api_key)
-        st.markdown("### 📝 解析結果（AI出力）")
-        st.text(text)
+    # Gemini API 初期化
+    try:
+        genai.configure(api_key=api_key)
+    except Exception as e:
+        st.error(f"APIキーの設定に失敗しました: {e}")
+        return
 
-        df = parse_nutrition_text_to_df(text)
-        if not df.empty:
-            st.table(df)
-            show_macro_charts(df)
-        else:
-            st.warning("栄養データの解析に失敗しました。フォーマットをご確認ください。")
-
-    st.markdown("---")
-    st.markdown("### 💬 AIに質問や献立提案を依頼")
-    user_input = st.text_area("質問内容を入力してください")
-    if st.button("質問する"):
-        if user_input.strip():
+    # 画像アップロード
+    uploaded_file = st.file_uploader("料理の画像をアップロードしてください", type=["jpg", "jpeg", "png"])
+    if uploaded_file:
+        st.image(uploaded_file, caption="アップロード画像", use_column_width=True)
+        with st.spinner("AIが画像を解析中..."):
             try:
-                genai.configure(api_key=api_key)
-                model = genai.GenerateModel('gemini-2.0-flash-lite')
-                response = model.generate_content(user_input)
-                st.markdown("### AIの回答")
-                st.write(response.text)
+                ai_output = analyze_image_with_gemini(uploaded_file, api_key)
+                st.subheader("🔍 AIによる解析結果")
+                st.text(ai_output)
+
+                df = parse_nutrition_text_to_df(ai_output)
+                if not df.empty:
+                    st.subheader("📊 栄養素テーブル")
+                    st.dataframe(df)
+                    show_macro_chart(df)
+                else:
+                    st.warning("解析結果を正しく読み取れませんでした。フォーマットが不明瞭な可能性があります。")
+
             except Exception as e:
-                st.error(f"エラーが発生しました: {e}")
-        else:
-            st.warning("質問を入力してください。")
+                st.error(f"画像解析中にエラーが発生しました: {e}")
+
+    # ユーザーの質問・献立提案
+    st.markdown("---")
+    st.subheader("💬 AIに質問・献立提案を依頼")
+    user_input = st.text_area("質問を入力してください（例：高タンパクな朝食メニューは？）")
+    if st.button("AIに質問する") and user_input.strip():
+        try:
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            response = model.generate_content(user_input)
+            st.markdown("### 🤖 AIの回答")
+            st.write(response.text)
+        except Exception as e:
+            st.error(f"AIからの回答取得に失敗しました: {e}")
 
 if __name__ == "__main__":
     main()
