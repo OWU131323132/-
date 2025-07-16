@@ -20,6 +20,11 @@ def analyze_nutrition_by_text(dish_name, api_key):
     prompt = (
         f"料理名「{dish_name}」の主な食材と、"
         "カロリー(kcal)、タンパク質(g)、脂質(g)、炭水化物(g)を表形式で教えてください。"
+        "\n例:\n"
+        "| 食材          | カロリー(kcal) | タンパク質(g) | 脂質(g) | 炭水化物(g) |\n"
+        "|---------------|----------------|---------------|---------|-------------|\n"
+        "| りんご       | 52             | 0.3           | 0.2     | 14          |\n"
+        "| バナナ       | 89             | 1.1           | 0.3     | 23          |"
     )
     response = model.generate_content(prompt)
     return response.text
